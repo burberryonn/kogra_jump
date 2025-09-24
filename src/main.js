@@ -33,6 +33,8 @@ const PLATFORM_MIN_GAP = 55;
 const PLATFORM_MAX_GAP = 95;
 const MOVING_PLATFORM_PROB = 0.18;
 const DEAD_PLATFORM_PROB = 0.22;
+const PLATFORM_TARGET_COUNT = 12;
+const CAMERA_THRESHOLD = HEIGHT * 0.35;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -50,6 +52,17 @@ const fxFiles = [
   '/fx/audio_2025-09-24_18-17-52.ogg',
   '/fx/audio_2025-09-24_18-17-56.ogg',
 ];
+
+const FX_POOL_SIZE = 4;
+const fxPool = fxFiles.map((src) => ({
+  index: 0,
+  elements: Array.from({ length: FX_POOL_SIZE }, () => {
+    const audio = new Audio(src);
+    audio.preload = 'auto';
+    audio.volume = 0.55;
+    return audio;
+  }),
+}));
 
 const keys = new Set();
 const touchState = { left: false, right: false };
@@ -81,6 +94,7 @@ player.sprite.onload = () => {
 };
 
 const backgroundMusic = new Audio('/music/untitled.wav');
+backgroundMusic.preload = 'auto';
 backgroundMusic.loop = true;
 backgroundMusic.volume = 0.25;
 let musicStarted = false;
@@ -97,6 +111,11 @@ function startMusic() {
 function setFxMute(isMuted) {
   state.fxMuted = isMuted;
   muteButton.textContent = isMuted ? 'Sound On' : 'Sound Off';
+  for (const pool of fxPool) {
+    for (const audio of pool.elements) {
+      audio.muted = isMuted;
+    }
+  }
 }
 
 function setMusicMute(isMuted) {
@@ -112,15 +131,22 @@ function setMusicMute(isMuted) {
 }
 
 function playRandomFx() {
-  if (state.fxMuted || !fxFiles.length) return;
-  const src = fxFiles[Math.floor(Math.random() * fxFiles.length)];
-  const audio = new Audio(src);
-  audio.volume = 0.55;
+  if (state.fxMuted || !fxPool.length) return;
+  const variant = fxPool[Math.floor(Math.random() * fxPool.length)];
+  const audio = variant.elements[variant.index];
+  variant.index = (variant.index + 1) % variant.elements.length;
+  audio.currentTime = 0;
   audio.play().catch(() => {});
 }
 
 let platforms = [];
+let highestPlatformY = HEIGHT;
 let lastTimestamp = 0;
+
+const hudState = {
+  score: -1,
+  best: -1,
+};
 
 function createPlatform(y) {
   const moving = Math.random() < MOVING_PLATFORM_PROB;
@@ -139,8 +165,11 @@ function createPlatform(y) {
 function populatePlatforms() {
   platforms = [];
   let currentY = HEIGHT - 20;
+  let minY = HEIGHT;
   while (currentY > -HEIGHT * 0.5) {
-    platforms.push(createPlatform(currentY));
+    const platform = createPlatform(currentY);
+    minY = Math.min(minY, platform.y);
+    platforms.push(platform);
     currentY -= PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
   }
   const ground = platforms[0];
@@ -148,11 +177,20 @@ function populatePlatforms() {
   ground.y = HEIGHT - 20;
   ground.type = 'static';
   ground.dx = 0;
+  minY = Math.min(minY, ground.y);
+  highestPlatformY = minY;
 }
 
-function updateHud() {
-  hudScore.textContent = Math.floor(state.score).toString();
-  hudBest.textContent = state.best.toString();
+function updateHud(force = false) {
+  const scoreValue = Math.floor(state.score);
+  if (force || hudState.score !== scoreValue) {
+    hudState.score = scoreValue;
+    hudScore.textContent = scoreValue.toString();
+  }
+  if (force || hudState.best !== state.best) {
+    hudState.best = state.best;
+    hudBest.textContent = state.best.toString();
+  }
 }
 
 function resetGame() {
@@ -171,7 +209,7 @@ function resetGame() {
   pauseButton.textContent = 'Pause';
   keys.clear();
   clearTouchState();
-  updateHud();
+  updateHud(true);
   startMusic();
   lastTimestamp = 0;
 }
@@ -234,22 +272,32 @@ function updatePlatforms(delta) {
     }
   }
 
-  const threshold = HEIGHT * 0.35;
-  if (player.y < threshold) {
-    const shift = threshold - player.y;
+  if (player.y < CAMERA_THRESHOLD) {
+    const shift = CAMERA_THRESHOLD - player.y;
     player.y += shift;
     state.score += shift;
     for (const platform of platforms) {
       platform.y += shift;
     }
+    highestPlatformY += shift;
   }
 
-  platforms = platforms.filter((platform) => platform.y < HEIGHT + PLATFORM_HEIGHT * 2);
+  let writeIndex = 0;
+  for (let i = 0; i < platforms.length; i += 1) {
+    const platform = platforms[i];
+    if (platform.y < HEIGHT + PLATFORM_HEIGHT * 2) {
+      platforms[writeIndex] = platform;
+      writeIndex += 1;
+    }
+  }
+  platforms.length = writeIndex;
+  highestPlatformY = platforms.length ? platforms[platforms.length - 1].y : HEIGHT;
 
-  while (platforms.length < 12) {
-    const highest = platforms.reduce((min, platform) => Math.min(min, platform.y), HEIGHT);
+  while (platforms.length < PLATFORM_TARGET_COUNT) {
     const gap = PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
-    platforms.push(createPlatform(highest - gap));
+    const platform = createPlatform(highestPlatformY - gap);
+    highestPlatformY = platform.y;
+    platforms.push(platform);
   }
 }
 
@@ -324,7 +372,7 @@ function endGame() {
   state.best = Math.max(state.best, Math.floor(state.score));
   localStorage.setItem('doodle-hop-best', String(state.best));
   finalScoreEl.textContent = Math.floor(state.score).toString();
-  updateHud();
+  updateHud(true);
   pauseOverlay.hidden = true;
   pauseButton.textContent = 'Pause';
   overlay.hidden = false;
@@ -472,7 +520,7 @@ setFxMute(false);
 setMusicMute(false);
 populatePlatforms();
 render();
-updateHud();
+updateHud(true);
 overlay.hidden = true;
 pauseOverlay.hidden = true;
 startOverlay.hidden = false;
