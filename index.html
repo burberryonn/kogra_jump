@@ -26,6 +26,7 @@
         <div class="panel">
           <h1>Brutalist Hop</h1>
           <p class="hint">A/D or ←/→ to move. Space to jump in.</p>
+          <p class="hint">On touch screens use the arrows below.</p>
           <button type="button" data-start>Start Game</button>
           <p class="hint small">Press P to pause, M to mute.</p>
         </div>
@@ -43,7 +44,26 @@
           <p class="final-score" data-final-score>0</p>
           <button type="button" data-restart>Play Again</button>
           <p class="hint">Press A/D or ←/→ to move, Space to restart.</p>
+          <p class="hint small">Tap the on-screen arrows on mobile.</p>
         </div>
+      </div>
+      <div class="touch-controls" data-touch-controls hidden>
+        <button
+          type="button"
+          class="touch-button touch-button--left"
+          data-move-left
+          aria-label="Move left"
+        >
+          ◀
+        </button>
+        <button
+          type="button"
+          class="touch-button touch-button--right"
+          data-move-right
+          aria-label="Move right"
+        >
+          ▶
+        </button>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

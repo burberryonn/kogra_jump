@@ -1,4 +1,4 @@
-﻿import './style.css';
+import './style.css';
 
 const canvas = document.querySelector('#game');
 const ctx = canvas.getContext('2d');
@@ -14,6 +14,9 @@ const startButton = document.querySelector('[data-start]');
 const resumeButton = document.querySelector('[data-resume]');
 const pauseButton = document.querySelector('[data-pause]');
 const muteButton = document.querySelector('[data-mute]');
+const touchControls = document.querySelector('[data-touch-controls]');
+const touchLeftButton = document.querySelector('[data-move-left]');
+const touchRightButton = document.querySelector('[data-move-right]');
 
 const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
@@ -48,6 +51,8 @@ const fxFiles = [
 ];
 
 const keys = new Set();
+const touchState = { left: false, right: false };
+const activeTouchPointers = new Map();
 
 const state = {
   running: false,
@@ -158,6 +163,7 @@ function resetGame() {
   startOverlay.hidden = true;
   pauseButton.textContent = 'Pause';
   keys.clear();
+  clearTouchState();
   updateHud();
   startMusic();
   lastTimestamp = 0;
@@ -171,8 +177,10 @@ function wrapHorizontally() {
 function updatePlayer(delta) {
   const previousY = player.y;
   const accel = MOVE_ACCEL * delta;
-  if (keys.has('ArrowLeft') || keys.has('KeyA')) player.vx -= accel;
-  if (keys.has('ArrowRight') || keys.has('KeyD')) player.vx += accel;
+  const movingLeft = keys.has('ArrowLeft') || keys.has('KeyA') || touchState.left;
+  const movingRight = keys.has('ArrowRight') || keys.has('KeyD') || touchState.right;
+  if (movingLeft && !movingRight) player.vx -= accel;
+  if (movingRight && !movingLeft) player.vx += accel;
 
   player.vx *= MOVE_FRICTION;
   player.vx = clamp(player.vx, -MAX_HORIZONTAL_SPEED, MAX_HORIZONTAL_SPEED);
@@ -313,6 +321,7 @@ function endGame() {
   pauseOverlay.hidden = true;
   pauseButton.textContent = 'Pause';
   overlay.hidden = false;
+  clearTouchState();
 }
 
 function togglePause(force) {
@@ -325,6 +334,7 @@ function togglePause(force) {
     pauseButton.textContent = 'Resume';
     backgroundMusic.pause();
     keys.clear();
+    clearTouchState();
   } else {
     pauseButton.textContent = 'Pause';
     startMusic();
@@ -376,6 +386,71 @@ startButton.addEventListener('click', () => {
 
 resumeButton.addEventListener('click', () => {
   togglePause(false);
+});
+
+function updateTouchControlsVisibility() {
+  if (!touchControls) return;
+  const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  touchControls.hidden = !isCoarsePointer;
+  if (!isCoarsePointer) {
+    clearTouchState();
+  }
+}
+
+function clearTouchState() {
+  touchState.left = false;
+  touchState.right = false;
+  activeTouchPointers.clear();
+}
+
+function handlePointerEnd(event) {
+  const direction = activeTouchPointers.get(event.pointerId);
+  if (!direction) return;
+  activeTouchPointers.delete(event.pointerId);
+  if (![...activeTouchPointers.values()].includes(direction)) {
+    touchState[direction] = false;
+  }
+}
+
+function attachTouchControl(button, direction) {
+  if (!button) return;
+  button.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    startMusic();
+    activeTouchPointers.set(event.pointerId, direction);
+    touchState[direction] = true;
+    if (button.setPointerCapture) {
+      button.setPointerCapture(event.pointerId);
+    }
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((eventName) => {
+    button.addEventListener(eventName, (event) => {
+      if (button.releasePointerCapture) {
+        try {
+          button.releasePointerCapture(event.pointerId);
+        } catch (error) {
+          // Ignore attempts to release uncaptured pointers.
+        }
+      }
+      handlePointerEnd(event);
+    });
+  });
+}
+
+const coarsePointerMedia = window.matchMedia('(pointer: coarse)');
+if (coarsePointerMedia.addEventListener) {
+  coarsePointerMedia.addEventListener('change', updateTouchControlsVisibility);
+} else if (coarsePointerMedia.addListener) {
+  coarsePointerMedia.addListener(updateTouchControlsVisibility);
+}
+
+attachTouchControl(touchLeftButton, 'left');
+attachTouchControl(touchRightButton, 'right');
+updateTouchControlsVisibility();
+
+window.addEventListener('blur', () => {
+  keys.clear();
+  clearTouchState();
 });
 
 setMute(false);

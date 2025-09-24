@@ -159,3 +159,52 @@ canvas {
 .control-bar button:hover {
   filter: brightness(1.1);
 }
+
+.touch-controls {
+  position: absolute;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 32px;
+  pointer-events: none;
+}
+
+.touch-button {
+  width: 88px;
+  height: 88px;
+  border: 6px solid #111;
+  background: #ffcb05;
+  color: #111;
+  font-size: 2rem;
+  font-weight: 700;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 12px 12px 0 #111;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.touch-button:active {
+  filter: brightness(0.92);
+  transform: translate(-2px, 4px) scale(0.98);
+}
+
+@media (pointer: coarse), (max-width: 600px) {
+  body {
+    overflow: hidden;
+  }
+
+  .control-bar {
+    top: auto;
+    bottom: 140px;
+    right: 22px;
+  }
+
+  .control-bar button {
+    box-shadow: 6px 6px 0 #111;
+  }
+}
