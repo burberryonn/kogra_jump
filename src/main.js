@@ -14,6 +14,7 @@ const startButton = document.querySelector('[data-start]');
 const resumeButton = document.querySelector('[data-resume]');
 const pauseButton = document.querySelector('[data-pause]');
 const muteButton = document.querySelector('[data-mute]');
+const musicButton = document.querySelector('[data-music]');
 const touchControls = document.querySelector('[data-touch-controls]');
 const touchLeftButton = document.querySelector('[data-move-left]');
 const touchRightButton = document.querySelector('[data-move-right]');
@@ -57,7 +58,8 @@ const activeTouchPointers = new Map();
 const state = {
   running: false,
   paused: false,
-  muted: false,
+  fxMuted: false,
+  musicMuted: false,
   score: 0,
   best: Number(localStorage.getItem('doodle-hop-best') ?? '0'),
 };
@@ -84,7 +86,7 @@ backgroundMusic.volume = 0.25;
 let musicStarted = false;
 
 function startMusic() {
-  if (state.muted || musicStarted && !backgroundMusic.paused) return;
+  if (state.musicMuted || (musicStarted && !backgroundMusic.paused)) return;
   musicStarted = true;
   backgroundMusic.currentTime = backgroundMusic.currentTime || 0;
   backgroundMusic.play().catch(() => {
@@ -92,20 +94,25 @@ function startMusic() {
   });
 }
 
-function setMute(isMuted) {
-  state.muted = isMuted;
+function setFxMute(isMuted) {
+  state.fxMuted = isMuted;
+  muteButton.textContent = isMuted ? 'Sound On' : 'Sound Off';
+}
+
+function setMusicMute(isMuted) {
+  state.musicMuted = isMuted;
   backgroundMusic.muted = isMuted;
   if (isMuted) {
     backgroundMusic.pause();
-    muteButton.textContent = 'Sound On';
+    musicButton.textContent = 'Music On';
   } else {
-    muteButton.textContent = 'Mute';
+    musicButton.textContent = 'Music Off';
     startMusic();
   }
 }
 
 function playRandomFx() {
-  if (state.muted || !fxFiles.length) return;
+  if (state.fxMuted || !fxFiles.length) return;
   const src = fxFiles[Math.floor(Math.random() * fxFiles.length)];
   const audio = new Audio(src);
   audio.volume = 0.55;
@@ -344,7 +351,11 @@ function togglePause(force) {
 
 window.addEventListener('keydown', (event) => {
   if (event.code === 'KeyM') {
-    setMute(!state.muted);
+    setFxMute(!state.fxMuted);
+    return;
+  }
+  if (event.code === 'KeyN') {
+    setMusicMute(!state.musicMuted);
     return;
   }
   if (event.code === 'KeyP') {
@@ -376,7 +387,11 @@ pauseButton.addEventListener('click', () => {
 });
 
 muteButton.addEventListener('click', () => {
-  setMute(!state.muted);
+  setFxMute(!state.fxMuted);
+});
+
+musicButton.addEventListener('click', () => {
+  setMusicMute(!state.musicMuted);
 });
 
 startButton.addEventListener('click', () => {
@@ -453,7 +468,8 @@ window.addEventListener('blur', () => {
   clearTouchState();
 });
 
-setMute(false);
+setFxMute(false);
+setMusicMute(false);
 populatePlatforms();
 render();
 updateHud();
