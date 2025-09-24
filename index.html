@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Doodle Hop</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game" width="360" height="640"></canvas>
+      <div class="hud">
+        <div class="scoreboard">
+          <span>Score</span>
+          <strong data-score>0</strong>
+        </div>
+        <div class="scoreboard">
+          <span>Best</span>
+          <strong data-best>0</strong>
+        </div>
+      </div>
+      <div class="control-bar">
+        <button type="button" data-pause>Pause</button>
+        <button type="button" data-mute>Mute</button>
+      </div>
+      <div class="overlay start" data-start-overlay>
+        <div class="panel">
+          <h1>Brutalist Hop</h1>
+          <p class="hint">A/D or ←/→ to move. Space to jump in.</p>
+          <button type="button" data-start>Start Game</button>
+          <p class="hint small">Press P to pause, M to mute.</p>
+        </div>
+      </div>
+      <div class="overlay pause" data-pause-overlay hidden>
+        <div class="panel">
+          <h2>Paused</h2>
+          <button type="button" data-resume>Resume</button>
+          <p class="hint small">Press P or the button to continue.</p>
+        </div>
+      </div>
+      <div class="overlay" data-overlay hidden>
+        <div class="panel">
+          <h1>Doodle Hop</h1>
+          <p class="final-score" data-final-score>0</p>
+          <button type="button" data-restart>Play Again</button>
+          <p class="hint">Press A/D or ←/→ to move, Space to restart.</p>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

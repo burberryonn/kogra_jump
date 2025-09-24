@@ -1,0 +1,161 @@
+:root {
+  color-scheme: light;
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: #f4f0e6;
+  color: #111;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body,
+html {
+  height: 100%;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f4f0e6;
+  overflow: hidden;
+}
+
+#app {
+  position: relative;
+  width: min(100vw, 420px);
+  height: min(100vh, 760px);
+}
+
+canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #fff7d6;
+  border: 6px solid #111;
+  box-shadow: 18px 18px 0 #111;
+}
+
+.hud {
+  position: absolute;
+  top: 22px;
+  left: 22px;
+  display: flex;
+  gap: 16px;
+  padding: 14px 20px;
+  background: #fffbf0;
+  border: 4px solid #111;
+  box-shadow: 10px 10px 0 #111;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.scoreboard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.scoreboard span {
+  font-size: 0.65rem;
+  opacity: 0.65;
+}
+
+.scoreboard strong {
+  font-size: 1.1rem;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 17, 17, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay .panel {
+  background: #fffbf0;
+  border: 6px solid #111;
+  box-shadow: 16px 16px 0 #111;
+  padding: 28px 36px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.overlay.start {
+  background: rgba(17, 17, 17, 0.82);
+}
+
+.overlay.start .panel {
+  max-width: 280px;
+}
+
+.overlay.pause .panel {
+  max-width: 220px;
+}
+
+.overlay h1 {
+  font-size: 1.8rem;
+  margin-bottom: 12px;
+}
+
+.final-score {
+  font-size: 2.8rem;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+
+.overlay button {
+  border: 4px solid #111;
+  background: #ffcb05;
+  color: #111;
+  padding: 12px 30px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.overlay .hint {
+  margin-top: 16px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.overlay .hint.small {
+  font-size: 0.65rem;
+  opacity: 0.75;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.control-bar {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.control-bar button {
+  border: 4px solid #111;
+  background: #ffcb05;
+  color: #111;
+  padding: 10px 20px;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 8px 8px 0 #111;
+}
+
+.control-bar button:hover {
+  filter: brightness(1.1);
+}
