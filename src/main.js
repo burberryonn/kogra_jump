@@ -32,9 +32,11 @@ const PLATFORM_HEIGHT = 14;
 const PLATFORM_MIN_GAP = 55;
 const PLATFORM_MAX_GAP = 95;
 const MOVING_PLATFORM_PROB = 0.18;
-const DEAD_PLATFORM_PROB = 0.22;
+const DEAD_PLATFORM_PROB = 0.28;
 const PLATFORM_TARGET_COUNT = 12;
 const CAMERA_THRESHOLD = HEIGHT * 0.35;
+const MAX_DEAD_STREAK = 1;
+const MAX_REACHABLE_ASCENT = 160;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -141,6 +143,8 @@ function playRandomFx() {
 
 let platforms = [];
 let highestPlatformY = HEIGHT;
+let consecutiveDeadPlatforms = 0;
+let lastReachablePlatformY = HEIGHT;
 let lastTimestamp = 0;
 
 const hudState = {
@@ -148,11 +152,26 @@ const hudState = {
   best: -1,
 };
 
-function createPlatform(y) {
+function createPlatform(gap) {
+  const clampedGap = Math.max(0, gap);
   const moving = Math.random() < MOVING_PLATFORM_PROB;
   let type = moving ? 'moving' : 'static';
-  if (!moving && Math.random() < DEAD_PLATFORM_PROB) type = 'dead';
-  return {
+  const canBeDead = !moving && consecutiveDeadPlatforms < MAX_DEAD_STREAK;
+  if (canBeDead && Math.random() < DEAD_PLATFORM_PROB) {
+    type = 'dead';
+  }
+
+  const minAllowedY = lastReachablePlatformY - MAX_REACHABLE_ASCENT;
+  if (type === 'dead' && consecutiveDeadPlatforms >= MAX_DEAD_STREAK) {
+    type = moving ? 'moving' : 'static';
+  }
+
+  let y = highestPlatformY - clampedGap;
+  if (type !== 'dead' && y < minAllowedY) {
+    y = minAllowedY;
+  }
+
+  const platform = {
     x: Math.random() * (WIDTH - PLATFORM_WIDTH),
     y,
     width: PLATFORM_WIDTH,
@@ -160,25 +179,72 @@ function createPlatform(y) {
     type,
     dx: type === 'moving' ? (Math.random() < 0.5 ? -1 : 1) * (1 + Math.random() * 0.6) : 0,
   };
+
+  highestPlatformY = platform.y;
+  if (platform.type === 'dead') {
+    consecutiveDeadPlatforms += 1;
+  } else {
+    consecutiveDeadPlatforms = 0;
+    lastReachablePlatformY = platform.y;
+  }
+
+  return platform;
+}
+
+function rebuildPlatformAnchors() {
+  if (!platforms.length) {
+    highestPlatformY = HEIGHT;
+    lastReachablePlatformY = HEIGHT;
+    consecutiveDeadPlatforms = 0;
+    return;
+  }
+
+  highestPlatformY = platforms[platforms.length - 1].y;
+
+  let trailingDead = 0;
+  let reachableFound = false;
+  for (let i = platforms.length - 1; i >= 0; i -= 1) {
+    const platform = platforms[i];
+    if (!reachableFound && platform.type === 'dead') {
+      trailingDead += 1;
+      continue;
+    }
+    if (!reachableFound) {
+      lastReachablePlatformY = platform.y;
+      reachableFound = true;
+    }
+    break;
+  }
+
+  if (!reachableFound) {
+    lastReachablePlatformY = highestPlatformY;
+  }
+
+  consecutiveDeadPlatforms = trailingDead;
 }
 
 function populatePlatforms() {
   platforms = [];
-  let currentY = HEIGHT - 20;
-  let minY = HEIGHT;
-  while (currentY > -HEIGHT * 0.5) {
-    const platform = createPlatform(currentY);
-    minY = Math.min(minY, platform.y);
+  const ground = {
+    x: WIDTH / 2 - PLATFORM_WIDTH / 2,
+    y: HEIGHT - 20,
+    width: PLATFORM_WIDTH,
+    height: PLATFORM_HEIGHT,
+    type: 'static',
+    dx: 0,
+  };
+  platforms.push(ground);
+  highestPlatformY = ground.y;
+  lastReachablePlatformY = ground.y;
+  consecutiveDeadPlatforms = 0;
+
+  while (highestPlatformY > -HEIGHT * 0.5) {
+    const gap = PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
+    const platform = createPlatform(gap);
     platforms.push(platform);
-    currentY -= PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
   }
-  const ground = platforms[0];
-  ground.x = WIDTH / 2 - PLATFORM_WIDTH / 2;
-  ground.y = HEIGHT - 20;
-  ground.type = 'static';
-  ground.dx = 0;
-  minY = Math.min(minY, ground.y);
-  highestPlatformY = minY;
+
+  rebuildPlatformAnchors();
 }
 
 function updateHud(force = false) {
@@ -291,12 +357,11 @@ function updatePlatforms(delta) {
     }
   }
   platforms.length = writeIndex;
-  highestPlatformY = platforms.length ? platforms[platforms.length - 1].y : HEIGHT;
+  rebuildPlatformAnchors();
 
   while (platforms.length < PLATFORM_TARGET_COUNT) {
     const gap = PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
-    const platform = createPlatform(highestPlatformY - gap);
-    highestPlatformY = platform.y;
+    const platform = createPlatform(gap);
     platforms.push(platform);
   }
 }
