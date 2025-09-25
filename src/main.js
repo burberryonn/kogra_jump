@@ -35,6 +35,12 @@ const MOVING_PLATFORM_PROB = 0.18;
 const DEAD_PLATFORM_PROB = 0.28;
 const PLATFORM_TARGET_COUNT = 12;
 const CAMERA_THRESHOLD = HEIGHT * 0.35;
+
+const DEATH_ANIMATION_DURATION = 90;
+const DEATH_ROTATION_SPEED = Math.PI / 32;
+const DEATH_FADE_MAX = 0.7;
+const DEATH_CAMERA_MAX_OFFSET = 96;
+
 const POWER_UP_SIZE = 26;
 const POWER_UP_BASE_SPAWN_CHANCE = 0.22;
 const MILLIS_PER_FRAME = 16.67;
@@ -79,6 +85,7 @@ function getMonsterSpawnProbability() {
       progress
   );
 }
+
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -180,12 +187,19 @@ const player = {
   facing: 1,
   sprite: new Image(),
   spriteReady: false,
+
+  falling: false,
+  deathTimer: 0,
+  deathProgress: 0,
+  rotation: 0,
+
   powerUp: {
     active: false,
     type: null,
     remaining: 0,
     elapsed: 0,
   },
+
 };
 player.sprite.src = '/assets/kogr.svg';
 player.sprite.onload = () => {
@@ -562,7 +576,14 @@ function resetGame() {
   player.vx = 0;
   player.vy = -8;
   player.facing = 1;
+
+  player.falling = false;
+  player.deathTimer = 0;
+  player.deathProgress = 0;
+  player.rotation = 0;
+
   deactivatePowerUp(true);
+
   state.score = 0;
   state.running = true;
   state.paused = false;
@@ -583,6 +604,7 @@ function wrapHorizontally() {
 }
 
 function updatePlayer(delta) {
+  if (player.falling) return player.y;
   const previousY = player.y;
   const physics = getPowerUpPhysics();
   const accel = MOVE_ACCEL * delta * physics.horizontalMultiplier;
@@ -875,6 +897,8 @@ function drawMonsters() {
 }
 
 function drawPlayer() {
+
+
   if (player.powerUp.active) {
     const definition = powerUpDefinitions[player.powerUp.type];
     if (definition) {
@@ -897,22 +921,38 @@ function drawPlayer() {
     return;
   }
 
+
   ctx.save();
   ctx.translate(player.x + player.width / 2, player.y + player.height / 2);
+  if (player.falling) {
+    ctx.rotate(player.rotation);
+  }
   ctx.scale(player.facing < 0 ? -1 : 1, 1);
-  ctx.drawImage(
-    player.sprite,
-    -player.width / 2,
-    -player.height / 2,
-    player.width,
-    player.height
-  );
+  if (player.spriteReady) {
+    ctx.drawImage(
+      player.sprite,
+      -player.width / 2,
+      -player.height / 2,
+      player.width,
+      player.height
+    );
+  } else {
+    ctx.fillStyle = '#ffcb05';
+    ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
+  }
   ctx.restore();
 }
 
 function update(delta) {
   if (!state.running || state.paused) return;
+
+  if (player.falling) {
+    updateDeathFall(delta);
+    return;
+  }
+
   updateActivePowerUp(delta);
+
   const previousY = updatePlayer(delta);
 
   checkPowerUpCollection();
@@ -926,12 +966,17 @@ function update(delta) {
   updatePlatforms(delta);
 
   if (player.y > HEIGHT + player.height) {
-    endGame();
+    startDeathFall();
   }
 }
 
 function render() {
   drawBackground();
+  const fallProgress = player.falling ? player.deathProgress : 0;
+  const cameraOffset = player.falling ? fallProgress * DEATH_CAMERA_MAX_OFFSET : 0;
+
+  ctx.save();
+  ctx.translate(0, -cameraOffset);
   drawPlatforms();
 
   drawPowerUps();
@@ -939,6 +984,42 @@ function render() {
   drawMonsters();
 
   drawPlayer();
+  ctx.restore();
+
+  if (player.falling) {
+    const fade = clamp(fallProgress * DEATH_FADE_MAX, 0, DEATH_FADE_MAX);
+    ctx.fillStyle = `rgba(0, 0, 0, ${fade})`;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  }
+}
+
+function startDeathFall() {
+  if (player.falling) return;
+  player.falling = true;
+  player.deathTimer = DEATH_ANIMATION_DURATION;
+  player.deathProgress = 0;
+  player.rotation = 0;
+  player.vy = Math.max(player.vy, 4);
+  keys.clear();
+  clearTouchState();
+}
+
+function updateDeathFall(delta) {
+  player.vy += GRAVITY * delta * 1.3;
+  player.y += player.vy * delta * 1.6;
+  player.x += player.vx * delta * 1.6;
+  player.vx *= 0.98;
+  wrapHorizontally();
+
+  const rotationDirection = player.vx >= 0 ? 1 : -1;
+  player.rotation += rotationDirection * DEATH_ROTATION_SPEED * delta;
+
+  player.deathTimer -= delta;
+  player.deathProgress = clamp(1 - player.deathTimer / DEATH_ANIMATION_DURATION, 0, 1);
+
+  if (player.deathTimer <= 0) {
+    endGame();
+  }
 }
 
 function loop(timestamp) {
@@ -956,7 +1037,14 @@ function loop(timestamp) {
 function endGame() {
   state.running = false;
   state.paused = false;
+
+  player.falling = false;
+  player.deathTimer = 0;
+  player.deathProgress = 0;
+  player.rotation = 0;
+
   deactivatePowerUp();
+
   state.best = Math.max(state.best, Math.floor(state.score));
   localStorage.setItem('doodle-hop-best', String(state.best));
   finalScoreEl.textContent = Math.floor(state.score).toString();
@@ -968,7 +1056,7 @@ function endGame() {
 }
 
 function togglePause(force) {
-  if (!state.running) return;
+  if (!state.running || player.falling) return;
   const nextState = force === undefined ? !state.paused : force;
   if (nextState === state.paused) return;
   state.paused = nextState;
