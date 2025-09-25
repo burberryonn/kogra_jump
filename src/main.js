@@ -35,6 +35,10 @@ const MOVING_PLATFORM_PROB = 0.18;
 const DEAD_PLATFORM_PROB = 0.28;
 const PLATFORM_TARGET_COUNT = 12;
 const CAMERA_THRESHOLD = HEIGHT * 0.35;
+
+const BREAKABLE_PLATFORM_PROB = 0.16;
+const BREAKABLE_BREAK_DELAY = 18;
+
 const MAX_DEAD_STREAK = 1;
 const MAX_REACHABLE_ASCENT = 160;
 
@@ -79,6 +83,7 @@ const platformColors = {
   static: '#111111',
   moving: '#2c6df2',
   dead: '#ff1b4b',
+  breakable: '#7a4a21',
 };
 
 const fxFiles = [
@@ -220,7 +225,16 @@ function createPlatform(gap) {
   const moving = Math.random() < MOVING_PLATFORM_PROB;
   let type = moving ? 'moving' : 'static';
 
+
+  if (!moving) {
+    const roll = Math.random();
+    if (roll < DEAD_PLATFORM_PROB) type = 'dead';
+    else if (roll < DEAD_PLATFORM_PROB + BREAKABLE_PLATFORM_PROB) type = 'breakable';
+  }
+
+
   if (!moving && Math.random() < DEAD_PLATFORM_PROB) type = 'dead';
+
   return {
     id: platformIdCounter += 1,
   const canBeDead = !moving && consecutiveDeadPlatforms < MAX_DEAD_STREAK;
@@ -245,6 +259,11 @@ function createPlatform(gap) {
     height: PLATFORM_HEIGHT,
     type,
     dx: type === 'moving' ? (Math.random() < 0.5 ? -1 : 1) * (1 + Math.random() * 0.6) : 0,
+    breaking: false,
+    breakTimer: 0,
+    disabled: false,
+    toRemove: false,
+    shakeSeed: Math.random() * Math.PI * 2,
   };
 
   highestPlatformY = platform.y;
@@ -354,7 +373,21 @@ function populatePlatforms() {
 
   }
 
+  const ground = platforms[0];
+  ground.x = WIDTH / 2 - PLATFORM_WIDTH / 2;
+  ground.y = HEIGHT - 20;
+  ground.type = 'static';
+  ground.dx = 0;
+  ground.breaking = false;
+  ground.breakTimer = 0;
+  ground.disabled = false;
+  ground.toRemove = false;
+  minY = Math.min(minY, ground.y);
+  highestPlatformY = minY;
+
+
   rebuildPlatformAnchors();
+
 }
 
 function updateHud(force = false) {
@@ -419,11 +452,11 @@ function updatePlayer(delta) {
 }
 
 function handlePlatformCollisions(previousY) {
-  if (player.vy <= 0) return false;
+  if (player.vy <= 0) return null;
   const prevBottom = previousY + player.height;
   const currBottom = player.y + player.height;
   for (const platform of platforms) {
-    if (platform.type === 'dead') continue;
+    if (platform.type === 'dead' || platform.disabled) continue;
     const platformTop = platform.y;
     const horizontalOverlap =
       player.x + player.width > platform.x && player.x < platform.x + platform.width;
@@ -431,10 +464,16 @@ function handlePlatformCollisions(previousY) {
     if (horizontalOverlap && prevBottom <= platformTop && currBottom >= platformTop) {
       player.y = platformTop - player.height;
       player.vy = JUMP_VELOCITY;
-      return true;
+      if (platform.type === 'breakable') {
+        platform.breaking = true;
+        platform.disabled = true;
+        platform.breakTimer = 0;
+        platform.toRemove = false;
+      }
+      return platform;
     }
   }
-  return false;
+  return null;
 }
 
 function updatePlatforms(delta) {
@@ -445,6 +484,13 @@ function updatePlatforms(delta) {
       if (platform.x < 0 || platform.x + platform.width > WIDTH) {
         platform.dx *= -1;
         platform.x = clamp(platform.x, 0, WIDTH - platform.width);
+      }
+    }
+
+    if (platform.type === 'breakable' && platform.breaking) {
+      platform.breakTimer += delta;
+      if (platform.breakTimer >= BREAKABLE_BREAK_DELAY) {
+        platform.toRemove = true;
       }
     }
   }
@@ -465,7 +511,7 @@ function updatePlatforms(delta) {
   let writeIndex = 0;
   for (let i = 0; i < platforms.length; i += 1) {
     const platform = platforms[i];
-    if (platform.y < HEIGHT + PLATFORM_HEIGHT * 2) {
+    if (!platform.toRemove && platform.y < HEIGHT + PLATFORM_HEIGHT * 2) {
       platforms[writeIndex] = platform;
       writeIndex += 1;
     }
@@ -556,7 +602,37 @@ function drawBackground() {
 
 function drawPlatforms() {
   for (const platform of platforms) {
-    ctx.fillStyle = platformColors[platform.type];
+    if (platform.type === 'breakable') {
+      ctx.save();
+      const progress = clamp(
+        platform.breaking ? platform.breakTimer / BREAKABLE_BREAK_DELAY : 0,
+        0,
+        1
+      );
+      const wobble = platform.breaking ? Math.sin((platform.breakTimer + platform.shakeSeed) * 4) * 2 : 0;
+      const tilt = platform.breaking ? Math.sin((platform.breakTimer + platform.shakeSeed) * 6) * 0.12 : 0;
+      ctx.translate(platform.x + platform.width / 2 + wobble, platform.y + platform.height / 2 + progress * 6);
+      ctx.rotate(tilt);
+      ctx.scale(1, 1 - progress * 0.4);
+      ctx.translate(-platform.width / 2, -platform.height / 2);
+
+      ctx.fillStyle = platformColors.breakable;
+      ctx.fillRect(0, 0, platform.width, platform.height);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.fillRect(0, 0, platform.width, 4);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(10, 3);
+      ctx.lineTo(platform.width * 0.35, platform.height - 3);
+      ctx.lineTo(platform.width * 0.7, 4);
+      ctx.lineTo(platform.width - 12, platform.height - 2);
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+
+    ctx.fillStyle = platformColors[platform.type] ?? platformColors.static;
     ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
     ctx.fillStyle = '#fff7d6';
     ctx.fillRect(platform.x, platform.y, 6, platform.height);
