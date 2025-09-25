@@ -32,12 +32,53 @@ const PLATFORM_HEIGHT = 14;
 const PLATFORM_MIN_GAP = 55;
 const PLATFORM_MAX_GAP = 95;
 const MOVING_PLATFORM_PROB = 0.18;
-const DEAD_PLATFORM_PROB = 0.22;
+const DEAD_PLATFORM_PROB = 0.28;
 const PLATFORM_TARGET_COUNT = 12;
 const CAMERA_THRESHOLD = HEIGHT * 0.35;
 const POWER_UP_SIZE = 26;
 const POWER_UP_BASE_SPAWN_CHANCE = 0.22;
 const MILLIS_PER_FRAME = 16.67;
+
+const BREAKABLE_PLATFORM_PROB = 0.16;
+const BREAKABLE_BREAK_DELAY = 18;
+
+const MAX_DEAD_STREAK = 1;
+const MAX_REACHABLE_ASCENT = 160;
+
+const MONSTER_WIDTH = 40;
+const MONSTER_HEIGHT = 36;
+const MONSTER_TYPES = [
+  { id: 'walker', speedRange: [0.45, 0.9] },
+  { id: 'sprinter', speedRange: [0.8, 1.25] },
+];
+const MONSTER_SCORE_BONUS = 250;
+const MONSTER_TOP_TOLERANCE = 12;
+const MONSTER_VERTICAL_BUFFER = 160;
+const MONSTER_DIFFICULTY = {
+  baseSpawnProbability: 0.18,
+  maxSpawnProbability: 0.42,
+  scoreForMaxSpawn: 3600,
+};
+
+const monsters = [];
+let platformIdCounter = 0;
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function getMonsterSpawnProbability() {
+  const progress = clamp(
+    state.score / MONSTER_DIFFICULTY.scoreForMaxSpawn,
+    0,
+    1
+  );
+  return (
+    MONSTER_DIFFICULTY.baseSpawnProbability +
+    (MONSTER_DIFFICULTY.maxSpawnProbability - MONSTER_DIFFICULTY.baseSpawnProbability) *
+      progress
+  );
+}
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -45,6 +86,7 @@ const platformColors = {
   static: '#111111',
   moving: '#2c6df2',
   dead: '#ff1b4b',
+  breakable: '#7a4a21',
 };
 
 const powerUpDefinitions = {
@@ -91,15 +133,25 @@ const fxFiles = [
 ];
 
 const FX_POOL_SIZE = 4;
-const fxPool = fxFiles.map((src) => ({
-  index: 0,
-  elements: Array.from({ length: FX_POOL_SIZE }, () => {
-    const audio = new Audio(src);
-    audio.preload = 'auto';
-    audio.volume = 0.55;
-    return audio;
-  }),
-}));
+const fxPools = [];
+
+function createFxPool(src, size = FX_POOL_SIZE, volume = 0.55) {
+  const pool = {
+    index: 0,
+    elements: Array.from({ length: size }, () => {
+      const audio = new Audio(src);
+      audio.preload = 'auto';
+      audio.volume = volume;
+      return audio;
+    }),
+  };
+  fxPools.push(pool);
+  return pool;
+}
+
+const landingFxPools = fxFiles.map((src) => createFxPool(src));
+const stompFxPool = createFxPool('/fx/audio_2025-09-24_18-17-45.ogg', 3, 0.6);
+const monsterHitFxPool = createFxPool('/fx/audio_2025-09-24_18-17-52.ogg', 3, 0.6);
 
 const powerUpFx = new Audio('/fx/audio_2025-09-24_18-17-52.ogg');
 powerUpFx.preload = 'auto';
@@ -158,7 +210,7 @@ function startMusic() {
 function setFxMute(isMuted) {
   state.fxMuted = isMuted;
   muteButton.textContent = isMuted ? 'Sound On' : 'Sound Off';
-  for (const pool of fxPool) {
+  for (const pool of fxPools) {
     for (const audio of pool.elements) {
       audio.muted = isMuted;
     }
@@ -178,17 +230,37 @@ function setMusicMute(isMuted) {
   }
 }
 
+function playFromPool(pool) {
+  if (state.fxMuted) return;
+  const audio = pool.elements[pool.index];
+  pool.index = (pool.index + 1) % pool.elements.length;
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+}
+
 function playRandomFx() {
-  if (state.fxMuted || !fxPool.length) return;
-  const variant = fxPool[Math.floor(Math.random() * fxPool.length)];
+  if (state.fxMuted || !landingFxPools.length) return;
+  const variant = landingFxPools[Math.floor(Math.random() * landingFxPools.length)];
   const audio = variant.elements[variant.index];
   variant.index = (variant.index + 1) % variant.elements.length;
   audio.currentTime = 0;
   audio.play().catch(() => {});
 }
 
+function playMonsterDefeatFx() {
+  if (!stompFxPool) return;
+  playFromPool(stompFxPool);
+}
+
+function playMonsterHitFx() {
+  if (!monsterHitFxPool) return;
+  playFromPool(monsterHitFxPool);
+}
+
 let platforms = [];
 let highestPlatformY = HEIGHT;
+let consecutiveDeadPlatforms = 0;
+let lastReachablePlatformY = HEIGHT;
 let lastTimestamp = 0;
 
 function pickPowerUpType() {
@@ -289,10 +361,41 @@ const hudState = {
   best: -1,
 };
 
-function createPlatform(y) {
+function createPlatform(gap) {
+  const clampedGap = Math.max(0, gap);
   const moving = Math.random() < MOVING_PLATFORM_PROB;
   let type = moving ? 'moving' : 'static';
+
+
+  if (!moving) {
+    const roll = Math.random();
+    if (roll < DEAD_PLATFORM_PROB) type = 'dead';
+    else if (roll < DEAD_PLATFORM_PROB + BREAKABLE_PLATFORM_PROB) type = 'breakable';
+  }
+
+
   if (!moving && Math.random() < DEAD_PLATFORM_PROB) type = 'dead';
+
+
+
+  return {
+    id: platformIdCounter += 1,
+  const canBeDead = !moving && consecutiveDeadPlatforms < MAX_DEAD_STREAK;
+  if (canBeDead && Math.random() < DEAD_PLATFORM_PROB) {
+    type = 'dead';
+  }
+
+  const minAllowedY = lastReachablePlatformY - MAX_REACHABLE_ASCENT;
+  if (type === 'dead' && consecutiveDeadPlatforms >= MAX_DEAD_STREAK) {
+    type = moving ? 'moving' : 'static';
+  }
+
+  let y = highestPlatformY - clampedGap;
+  if (type !== 'dead' && y < minAllowedY) {
+    y = minAllowedY;
+  }
+
+
   const platform = {
     x: Math.random() * (WIDTH - PLATFORM_WIDTH),
     y,
@@ -300,30 +403,144 @@ function createPlatform(y) {
     height: PLATFORM_HEIGHT,
     type,
     dx: type === 'moving' ? (Math.random() < 0.5 ? -1 : 1) * (1 + Math.random() * 0.6) : 0,
+
     powerUp: null,
+
+    breaking: false,
+    breakTimer: 0,
+    disabled: false,
+    toRemove: false,
+    shakeSeed: Math.random() * Math.PI * 2,
+  };
+
+  highestPlatformY = platform.y;
+  if (platform.type === 'dead') {
+    consecutiveDeadPlatforms += 1;
+  } else {
+    consecutiveDeadPlatforms = 0;
+    lastReachablePlatformY = platform.y;
+  }
+
+  return platform;
+}
+
+function rebuildPlatformAnchors() {
+  if (!platforms.length) {
+    highestPlatformY = HEIGHT;
+    lastReachablePlatformY = HEIGHT;
+    consecutiveDeadPlatforms = 0;
+    return;
+  }
+
+  highestPlatformY = platforms[platforms.length - 1].y;
+
+  let trailingDead = 0;
+  let reachableFound = false;
+  for (let i = platforms.length - 1; i >= 0; i -= 1) {
+    const platform = platforms[i];
+    if (!reachableFound && platform.type === 'dead') {
+      trailingDead += 1;
+      continue;
+    }
+    if (!reachableFound) {
+      lastReachablePlatformY = platform.y;
+      reachableFound = true;
+    }
+    break;
+  }
+
+  if (!reachableFound) {
+    lastReachablePlatformY = highestPlatformY;
+  }
+
+  consecutiveDeadPlatforms = trailingDead;
+}
+
+function createMonsterForPlatform(platform) {
+  const type = MONSTER_TYPES[Math.floor(Math.random() * MONSTER_TYPES.length)];
+  const speed = randomBetween(type.speedRange[0], type.speedRange[1]);
+  const direction = Math.random() < 0.5 ? -1 : 1;
+  const x =
+    platform.x + Math.random() * Math.max(1, platform.width - MONSTER_WIDTH);
+  return {
+    type: type.id,
+    width: MONSTER_WIDTH,
+    height: MONSTER_HEIGHT,
+    x,
+    y: platform.y - MONSTER_HEIGHT,
+    vx: speed * direction,
+    platform,
   };
   platform.powerUp = createPowerUpForPlatform(platform);
   return platform;
 }
 
+function maybeSpawnMonsterOnPlatform(platform, { isInitialSpawn = false } = {}) {
+  if (platform.type !== 'static') return;
+  if (platform.width <= MONSTER_WIDTH) return;
+  if (platform.y > HEIGHT - MONSTER_VERTICAL_BUFFER) return;
+  if (isInitialSpawn && platform.y > HEIGHT * 0.55) return;
+  const probability = getMonsterSpawnProbability();
+  if (Math.random() > probability) return;
+  monsters.push(createMonsterForPlatform(platform));
+}
+
 function populatePlatforms() {
   platforms = [];
+
+  monsters.length = 0;
+  platformIdCounter = 0;
   let currentY = HEIGHT - 20;
   let minY = HEIGHT;
   while (currentY > -HEIGHT * 0.5) {
     const platform = createPlatform(currentY);
     minY = Math.min(minY, platform.y);
+    const isGroundCandidate = platforms.length === 0;
     platforms.push(platform);
+    if (!isGroundCandidate) {
+      maybeSpawnMonsterOnPlatform(platform, { isInitialSpawn: true });
+    }
     currentY -= PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
+
+  const ground = {
+    x: WIDTH / 2 - PLATFORM_WIDTH / 2,
+    y: HEIGHT - 20,
+    width: PLATFORM_WIDTH,
+    height: PLATFORM_HEIGHT,
+    type: 'static',
+    dx: 0,
+  };
+  platforms.push(ground);
+  highestPlatformY = ground.y;
+  lastReachablePlatformY = ground.y;
+  consecutiveDeadPlatforms = 0;
+
+  while (highestPlatformY > -HEIGHT * 0.5) {
+    const gap = PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
+    const platform = createPlatform(gap);
+    platforms.push(platform);
+
   }
+
   const ground = platforms[0];
   ground.x = WIDTH / 2 - PLATFORM_WIDTH / 2;
   ground.y = HEIGHT - 20;
   ground.type = 'static';
   ground.dx = 0;
+
   ground.powerUp = null;
+
+  ground.breaking = false;
+  ground.breakTimer = 0;
+  ground.disabled = false;
+  ground.toRemove = false;
+
   minY = Math.min(minY, ground.y);
   highestPlatformY = minY;
+
+
+  rebuildPlatformAnchors();
+
 }
 
 function updateHud(force = false) {
@@ -400,26 +617,38 @@ function updatePlayer(delta) {
 }
 
 function handlePlatformCollisions(previousY) {
-  if (player.vy <= 0) return false;
+  if (player.vy <= 0) return null;
   const prevBottom = previousY + player.height;
   const currBottom = player.y + player.height;
   const physics = getPowerUpPhysics();
   for (const platform of platforms) {
-    if (platform.type === 'dead') continue;
+    if (platform.type === 'dead' || platform.disabled) continue;
     const platformTop = platform.y;
     const horizontalOverlap =
       player.x + player.width > platform.x && player.x < platform.x + platform.width;
 
     if (horizontalOverlap && prevBottom <= platformTop && currBottom >= platformTop) {
       player.y = platformTop - player.height;
+
       player.vy = JUMP_VELOCITY * physics.jumpMultiplier;
       return true;
+
+      player.vy = JUMP_VELOCITY;
+      if (platform.type === 'breakable') {
+        platform.breaking = true;
+        platform.disabled = true;
+        platform.breakTimer = 0;
+        platform.toRemove = false;
+      }
+      return platform;
+ 
     }
   }
-  return false;
+  return null;
 }
 
 function updatePlatforms(delta) {
+  let cameraShift = 0;
   for (const platform of platforms) {
     if (platform.type === 'moving') {
       const previousX = platform.x;
@@ -433,38 +662,119 @@ function updatePlatforms(delta) {
         platform.powerUp.x += deltaX;
       }
     }
+
+    if (platform.type === 'breakable' && platform.breaking) {
+      platform.breakTimer += delta;
+      if (platform.breakTimer >= BREAKABLE_BREAK_DELAY) {
+        platform.toRemove = true;
+      }
+    }
   }
 
   if (player.y < CAMERA_THRESHOLD) {
-    const shift = CAMERA_THRESHOLD - player.y;
-    player.y += shift;
-    state.score += shift;
+    cameraShift = CAMERA_THRESHOLD - player.y;
+    player.y += cameraShift;
+    state.score += cameraShift;
     for (const platform of platforms) {
+
       platform.y += shift;
       if (platform.powerUp) {
         platform.powerUp.y += shift;
       }
+
+      platform.y += cameraShift;
     }
-    highestPlatformY += shift;
+    for (const monster of monsters) {
+      monster.y += cameraShift;
+
+    }
+    highestPlatformY += cameraShift;
   }
 
   let writeIndex = 0;
   for (let i = 0; i < platforms.length; i += 1) {
     const platform = platforms[i];
-    if (platform.y < HEIGHT + PLATFORM_HEIGHT * 2) {
+    if (!platform.toRemove && platform.y < HEIGHT + PLATFORM_HEIGHT * 2) {
       platforms[writeIndex] = platform;
       writeIndex += 1;
     }
   }
   platforms.length = writeIndex;
-  highestPlatformY = platforms.length ? platforms[platforms.length - 1].y : HEIGHT;
+  rebuildPlatformAnchors();
 
   while (platforms.length < PLATFORM_TARGET_COUNT) {
     const gap = PLATFORM_MIN_GAP + Math.random() * (PLATFORM_MAX_GAP - PLATFORM_MIN_GAP);
-    const platform = createPlatform(highestPlatformY - gap);
-    highestPlatformY = platform.y;
+    const platform = createPlatform(gap);
     platforms.push(platform);
+    maybeSpawnMonsterOnPlatform(platform);
   }
+
+  for (let i = monsters.length - 1; i >= 0; i -= 1) {
+    const monster = monsters[i];
+    const platformStillExists = platforms.includes(monster.platform);
+    if (
+      monster.y > HEIGHT + MONSTER_HEIGHT * 2 ||
+      !platformStillExists ||
+      monster.platform.type !== 'static'
+    ) {
+      monsters.splice(i, 1);
+    }
+  }
+
+  if (cameraShift > 0) {
+    state.score = Math.max(0, state.score);
+  }
+}
+
+function updateMonsters(delta, previousPlayerY) {
+  let stomped = false;
+  const previousBottom = previousPlayerY + player.height;
+
+  for (let i = monsters.length - 1; i >= 0; i -= 1) {
+    const monster = monsters[i];
+    if (!platforms.includes(monster.platform)) {
+      monsters.splice(i, 1);
+      continue;
+    }
+
+    const platform = monster.platform;
+    monster.y = platform.y - monster.height;
+    const leftBound = platform.x;
+    const rightBound = platform.x + platform.width - monster.width;
+
+    monster.x += monster.vx * delta * 1.4;
+    if (monster.x <= leftBound) {
+      monster.x = leftBound;
+      monster.vx = Math.abs(monster.vx);
+    } else if (monster.x >= rightBound) {
+      monster.x = rightBound;
+      monster.vx = -Math.abs(monster.vx);
+    }
+
+    const horizontalOverlap =
+      player.x + player.width > monster.x && player.x < monster.x + monster.width;
+    const verticalOverlap =
+      player.y + player.height > monster.y && player.y < monster.y + monster.height;
+
+    if (!horizontalOverlap || !verticalOverlap) continue;
+
+    const wasAbove = previousBottom <= monster.y + MONSTER_TOP_TOLERANCE;
+    if (player.vy > 0 && wasAbove) {
+      monsters.splice(i, 1);
+      player.y = monster.y - player.height;
+      player.vy = JUMP_VELOCITY * 0.92;
+      state.score += MONSTER_SCORE_BONUS;
+      stomped = true;
+      playMonsterDefeatFx();
+      continue;
+    }
+
+    playMonsterHitFx();
+    endGame();
+    return stomped;
+  }
+
+  return stomped;
 }
 
 function drawBackground() {
@@ -475,12 +785,43 @@ function drawBackground() {
 
 function drawPlatforms() {
   for (const platform of platforms) {
-    ctx.fillStyle = platformColors[platform.type];
+    if (platform.type === 'breakable') {
+      ctx.save();
+      const progress = clamp(
+        platform.breaking ? platform.breakTimer / BREAKABLE_BREAK_DELAY : 0,
+        0,
+        1
+      );
+      const wobble = platform.breaking ? Math.sin((platform.breakTimer + platform.shakeSeed) * 4) * 2 : 0;
+      const tilt = platform.breaking ? Math.sin((platform.breakTimer + platform.shakeSeed) * 6) * 0.12 : 0;
+      ctx.translate(platform.x + platform.width / 2 + wobble, platform.y + platform.height / 2 + progress * 6);
+      ctx.rotate(tilt);
+      ctx.scale(1, 1 - progress * 0.4);
+      ctx.translate(-platform.width / 2, -platform.height / 2);
+
+      ctx.fillStyle = platformColors.breakable;
+      ctx.fillRect(0, 0, platform.width, platform.height);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.fillRect(0, 0, platform.width, 4);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(10, 3);
+      ctx.lineTo(platform.width * 0.35, platform.height - 3);
+      ctx.lineTo(platform.width * 0.7, 4);
+      ctx.lineTo(platform.width - 12, platform.height - 2);
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+
+    ctx.fillStyle = platformColors[platform.type] ?? platformColors.static;
     ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
     ctx.fillStyle = '#fff7d6';
     ctx.fillRect(platform.x, platform.y, 6, platform.height);
   }
 }
+
 
 function drawPowerUps() {
   for (const platform of platforms) {
@@ -513,6 +854,23 @@ function drawPowerUps() {
       ctx.fill();
     }
     ctx.restore();
+
+function drawMonsters() {
+  for (const monster of monsters) {
+    const bodyColor = monster.type === 'sprinter' ? '#ff5d73' : '#2fd073';
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(monster.x, monster.y, monster.width, monster.height);
+
+    const eyeSize = 6;
+    const eyeOffsetX = monster.width * 0.25;
+    const eyeY = monster.y + monster.height * 0.35;
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(monster.x + eyeOffsetX, eyeY, eyeSize, eyeSize);
+    ctx.fillRect(monster.x + monster.width - eyeOffsetX - eyeSize, eyeY, eyeSize, eyeSize);
+
+    ctx.fillStyle = '#fff7d6';
+    ctx.fillRect(monster.x, monster.y + monster.height - 6, monster.width, 6);
+
   }
 }
 
@@ -556,8 +914,14 @@ function update(delta) {
   if (!state.running || state.paused) return;
   updateActivePowerUp(delta);
   const previousY = updatePlayer(delta);
+
   checkPowerUpCollection();
   const landed = handlePlatformCollisions(previousY);
+
+  const stomped = updateMonsters(delta, previousY);
+  if (!state.running) return;
+  const landed = !stomped && handlePlatformCollisions(previousY);
+
   if (landed) playRandomFx();
   updatePlatforms(delta);
 
@@ -569,7 +933,11 @@ function update(delta) {
 function render() {
   drawBackground();
   drawPlatforms();
+
   drawPowerUps();
+
+  drawMonsters();
+
   drawPlayer();
 }
 
