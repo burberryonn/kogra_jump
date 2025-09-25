@@ -88,7 +88,7 @@ const player = {
   sprite: new Image(),
   spriteReady: false,
 };
-player.sprite.src = '/avatar.png';
+player.sprite.src = '/assets/kogr.svg';
 player.sprite.onload = () => {
   player.spriteReady = true;
 };
